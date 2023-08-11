@@ -1,6 +1,7 @@
 package util
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -22,6 +23,8 @@ type API struct {
 	baseURL string
 }
 
+var Api = NewApi("")
+
 func NewApi(url string) *API {
 	api := API{}
 	if api.Client == nil {
@@ -37,14 +40,17 @@ func NewApi(url string) *API {
 	return &api
 }
 
-// using `omitempty` should ensur that we avoid processing an empty response value
+// using `omitempty` should ensure that we avoid processing an empty response value
 type ExternalResponse struct {
 	Value int `json:"value,omitempty"`
 }
 
-func (api *API) GetInteger(iter int) (*ExternalResponse, error) {
+// GetInteger makes the api request, processes the response and parses into a struct for easier handling
+// takes the current ctx and current iteration var
+func (api *API) GetInteger(ctx context.Context, iter int) (*ExternalResponse, error) {
 	resp, err := api.Client.Get(api.baseURL + "/integers/" + fmt.Sprint(iter))
 	if err != nil {
+		ctx.Done()
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -55,7 +61,7 @@ func (api *API) GetInteger(iter int) (*ExternalResponse, error) {
 	return response, nil
 }
 
-func GetDomain() string {
+func getDomain() string {
 	switch os.Getenv(ENV) {
 	case ENV_TEST:
 		return DOMAIN_LOCALHOST + ":80"
@@ -66,7 +72,7 @@ func GetDomain() string {
 	}
 }
 
-func GetHTTPProtocol() string {
+func getHTTPProtocol() string {
 	switch os.Getenv(ENV) {
 	case ENV_TEST:
 		return "http://"
@@ -78,7 +84,7 @@ func GetHTTPProtocol() string {
 }
 
 func BuildAddr() string {
-	return GetHTTPProtocol() + GetDomain()
+	return getHTTPProtocol() + getDomain()
 }
 
 // isEven checks whether a given value `input` is even or odd

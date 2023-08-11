@@ -4,8 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/mailgun/mailgun_mjevan93308/util"
+	"golang.org/x/net/context"
+	"golang.org/x/sync/errgroup"
+)
+
+const (
+	MaxRoutines = 10
 )
 
 type Result struct {
@@ -29,48 +36,51 @@ func (result *Result) AddToOdd(input int) {
 
 func main() {
 	result := Result{}
-	// allocate a buffered chan to control the number of go routines active in parallel
-	// use a waitGroup to ensur all goroutines finish before we return the result
-	buff := make(chan struct{}, 10)
-	var wg sync.WaitGroup
-	for i := 0; i <= 100; i++ {
-		// add capacity to the waitGroup for the current iteration
-		// for every iteration until the buffered chan reaches capacity, add a val to it
-		wg.Add(1)
-		buff <- struct{}{}
+	api := util.Api
+
+	ctx, cancelFn := context.WithTimeout(context.Background(), time.Second*1)
+	defer cancelFn()
+
+	// using `sync/errgroup` due to better error handling and easier goroutine limit enforcement
+	// thus eliminating need for waitgroup and buffered channel
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.SetLimit(MaxRoutines)
+	for i := 0; i < 100; i++ {
 		// re-allocating looping iter var due to unsafe access within go func
 		// https://pkg.go.dev/golang.org/x/tools/go/analysis/passes/loopclosure
 		i := i
 
-		go func() {
-			defer wg.Done()
-			if err := worker(&result, i); err != nil {
-				fmt.Printf("Encountered error when processing %d: %s", i, err)
+		eg.Go(func() error {
+			// check for context err, don't proceed if found
+			if ctx.Err() != nil {
+				fmt.Println("encountered ctx err")
+				return ctx.Err()
 			}
-			// pop val off buffered chan once job is done
-			// allowing next job to kick off
-			<-buff
-		}()
-		wg.Wait()
+			if err := worker(ctx, &result, api, i); err != nil {
+				result.Errors = append(result.Errors, fmt.Errorf("encountered error when processing %d: %s", i, err))
+			}
+			return nil
+		})
+	}
+	if err := eg.Wait(); err != nil {
+		fmt.Printf("errgroup returned err: %s\n", err)
+		return
 	}
 
-	result_json, err := json.Marshal(&result)
+	resultJson, err := json.Marshal(&result)
 	if err != nil {
 		fmt.Println("Could not marshal result to json")
+	} else {
+		fmt.Println(string(resultJson))
 	}
-	fmt.Println(string(result_json))
 }
 
-// worker:
-// - initializes the api
-// - makes the api call
-// - process the response
-func worker(result *Result, iter int) error {
-	api := util.NewApi(util.BuildAddr())
-	response, err := api.GetInteger(iter)
+// worker initiates the api call and process the response
+// - takes a context, pointer to result, pointer to shared api client, and the current iteration var
+// - returns an err if encountered
+func worker(ctx context.Context, result *Result, api *util.API, iter int) error {
+	response, err := api.GetInteger(ctx, iter)
 	if err != nil {
-		fmt.Println("error: %s", err)
-		result.Errors = append(result.Errors, err)
 		return err
 	}
 

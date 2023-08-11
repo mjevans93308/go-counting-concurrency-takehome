@@ -1,6 +1,7 @@
 package util
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -29,9 +30,10 @@ func TestGetInteger(t *testing.T) {
 		},
 	))
 	defer server.Close()
-	
+
 	api := NewApi(server.URL)
-	externalResp, err := api.GetInteger(5)
+	ctx := context.Background()
+	externalResp, err := api.GetInteger(ctx, 5)
 	if err != nil {
 		t.Errorf("expected resp.Val to be 5, got err %s", err)
 		return
